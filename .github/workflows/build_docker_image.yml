@@ -40,7 +40,7 @@ jobs:
           push: true
           tags: ghcr.io/${{ env.IMAGE }}:latest
           context: .
-          file: ./docker/production.dockerfile
+          file: ./docker/build.dockerfile
 
       - 
         name: Invoke deployment hook
