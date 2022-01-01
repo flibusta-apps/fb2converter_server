@@ -10,9 +10,13 @@ ADD https://github.com/rupor-github/fb2converter/releases/download/v1.59.0/fb2c_
 RUN unzip fb2c_linux_amd64.zip
 
 # Install requirements
-WORKDIR /root/temp
+WORKDIR /root/poetry
+COPY pyproject.toml poetry.lock /root/poetry/
+
+RUN pip install poetry --no-cache-dir \
+    && poetry export --without-hashes > requirements.txt
+
 ENV VENV_PATH=/opt/venv
-COPY ./requirements.txt ./
 RUN python -m venv $VENV_PATH \
     && . /opt/venv/bin/activate \
     && pip install -r requirements.txt --no-cache-dir
