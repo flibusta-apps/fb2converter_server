@@ -67,6 +67,11 @@ async def convert(
     )
 
 
+@router.get("/healthcheck")
+async def healthcheck():
+    return "Ok!"
+
+
 app = FastAPI()
 
 app.include_router(router)

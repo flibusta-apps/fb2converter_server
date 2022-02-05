@@ -10,6 +10,7 @@ fastapi = "^0.70.1"
 python-multipart = "^0.0.5"
 aiofiles = "^0.8.0"
 uvicorn = {extras = ["standart"], version = "^0.16.0"}
+httpx = "^0.22.0"
 
 [tool.poetry.dev-dependencies]
 
