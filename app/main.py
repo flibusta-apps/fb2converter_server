@@ -35,12 +35,11 @@ async def convert(
     converted_temp_filename = str(temp_uuid) + "." + format
 
     async with aiofiles.open(temp_filename, "wb") as f:
-        content = await file.read()
+        while (content := await file.read(1024)):
+            if isinstance(content, str):
+                content = content.encode()
 
-        if isinstance(content, str):
-            content = content.encode()
-
-        await f.write(content)
+            await f.write(content)
 
     proc = await asyncio.create_subprocess_exec(
         "./bin/fb2c",
