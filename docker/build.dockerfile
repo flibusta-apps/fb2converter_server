@@ -37,4 +37,4 @@ COPY ./scripts/healthcheck.py /root/healthcheck.py
 
 EXPOSE 8080
 
-CMD uvicorn main:app --host="0.0.0.0" --port="8080"
+CMD gunicorn -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8080
