@@ -18,6 +18,14 @@ from starlette.background import BackgroundTask
 
 import aiofiles
 import aiofiles.ospath
+import sentry_sdk
+
+from config import env_config
+
+
+sentry_sdk.init(
+    env_config.SENTRY_DSN,
+)
 
 
 router = APIRouter(tags=["converter"])
