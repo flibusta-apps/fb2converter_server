@@ -1,22 +1,12 @@
 import asyncio
-import os
+from typing import AsyncIterator
 import uuid
 
-from fastapi import (
-    FastAPI,
-    APIRouter,
-    File,
-    UploadFile,
-    Form,
-    HTTPException,
-    BackgroundTasks,
-    status,
-)
-from fastapi.responses import FileResponse
-
-from starlette.background import BackgroundTask
+from fastapi import FastAPI, APIRouter, File, UploadFile, Form, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 import aiofiles
+import aiofiles.os
 import aiofiles.ospath
 import sentry_sdk
 
@@ -33,14 +23,19 @@ router = APIRouter(tags=["converter"])
 
 @router.post("/")
 async def convert(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File({}),
     format: str = Form({}),
 ):
+    format_lower = format.lower()
+    if format_lower not in ["epub", "mobi"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Wrong format!"
+        )
+
     temp_uuid = uuid.uuid1()
 
     temp_filename = str(temp_uuid) + ".fb2"
-    converted_temp_filename = str(temp_uuid) + "." + format
+    converted_temp_filename = str(temp_uuid) + "." + format_lower
 
     async with aiofiles.open(temp_filename, "wb") as f:
         while content := await file.read(1024):
@@ -61,17 +56,26 @@ async def convert(
 
     _, stderr = await proc.communicate()
 
-    background_tasks.add_task(os.remove, temp_filename)
+    await aiofiles.os.remove(temp_filename)
 
     if proc.returncode != 0 or len(stderr) != 0:
+        try:
+            await aiofiles.os.remove(converted_temp_filename)
+        except FileNotFoundError:
+            pass
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Can't convert!"
         )
 
-    return FileResponse(
-        converted_temp_filename,
-        background=BackgroundTask(lambda: os.remove(converted_temp_filename)),
-    )
+    async def result_iterator() -> AsyncIterator[bytes]:
+        async with aiofiles.open(converted_temp_filename, "rb") as f:
+            while data := await f.read(2048):
+                yield data
+
+        await aiofiles.os.remove(converted_temp_filename)
+
+    return StreamingResponse(result_iterator())
 
 
 @router.get("/healthcheck")
