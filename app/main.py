@@ -37,26 +37,27 @@ async def convert(
     temp_filename = str(temp_uuid) + ".fb2"
     converted_temp_filename = str(temp_uuid) + "." + format_lower
 
-    async with aiofiles.open(temp_filename, "wb") as f:
-        while content := await file.read(1024):
-            if isinstance(content, str):
-                content = content.encode()
+    try:
+        async with aiofiles.open(temp_filename, "wb") as f:
+            while content := await file.read(1024):
+                if isinstance(content, str):
+                    content = content.encode()
 
-            await f.write(content)
+                await f.write(content)
 
-    proc = await asyncio.create_subprocess_exec(
-        "./bin/fb2c",
-        "convert",
-        "--to",
-        format,
-        temp_filename,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+        proc = await asyncio.create_subprocess_exec(
+            "./bin/fb2c",
+            "convert",
+            "--to",
+            format,
+            temp_filename,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
 
-    _, stderr = await proc.communicate()
-
-    await aiofiles.os.remove(temp_filename)
+        _, stderr = await proc.communicate()
+    finally:
+        await aiofiles.os.remove(temp_filename)
 
     if proc.returncode != 0 or len(stderr) != 0:
         try:
@@ -69,11 +70,12 @@ async def convert(
         )
 
     async def result_iterator() -> AsyncIterator[bytes]:
-        async with aiofiles.open(converted_temp_filename, "rb") as f:
-            while data := await f.read(2048):
-                yield data
-
-        await aiofiles.os.remove(converted_temp_filename)
+        try:
+            async with aiofiles.open(converted_temp_filename, "rb") as f:
+                while data := await f.read(2048):
+                    yield data
+        finally:
+            await aiofiles.os.remove(converted_temp_filename)
 
     return StreamingResponse(result_iterator())
 
