@@ -1,4 +1,7 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import os
+import time
 from typing import AsyncIterator
 import uuid
 
@@ -8,6 +11,7 @@ from fastapi.responses import StreamingResponse
 import aiofiles
 import aiofiles.os
 import aiofiles.ospath
+from fastapi_utils.tasks import repeat_every
 import sentry_sdk
 
 from config import env_config
@@ -88,3 +92,20 @@ async def healthcheck():
 app = FastAPI()
 
 app.include_router(router)
+
+
+@app.on_event("startup")
+@repeat_every(seconds=60 * 60)
+async def remote_temp_files():
+    def _foo():
+        current_time = time.time()
+
+        for f in os.listdir("/tmp/"):
+            creation_time = os.path.getctime(f)
+            if (current_time - creation_time) // 3600 >= 3:
+                os.unlink(f)
+
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor(1) as executor:
+        await loop.run_in_executor(executor, _foo)
