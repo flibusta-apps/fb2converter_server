@@ -31,7 +31,9 @@ COPY ./app/ ./
 ENV VENV_PATH=/opt/venv
 ENV PATH="$VENV_PATH/bin:$PATH"
 
-COPY --from=build-image /root/fb2converter/ /app/bin/
+COPY --from=build-image /root/fb2converter/fb2c /app/bin/
+COPY --from=build-image /root/fb2converter/kindlegen /app/bin/
+
 COPY --from=build-image $VENV_PATH $VENV_PATH
 COPY ./scripts/healthcheck.py /root/healthcheck.py
 
