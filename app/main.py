@@ -96,7 +96,7 @@ app.include_router(router)
 
 
 @app.on_event("startup")
-@repeat_every(seconds=60, raise_exceptions=True)
+@repeat_every(seconds=5 * 60, raise_exceptions=True)
 def remove_temp_files():
     current_time = time.time()
 
