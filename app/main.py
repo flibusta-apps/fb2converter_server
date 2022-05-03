@@ -1,6 +1,6 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import os
+import os.path
 import time
 from typing import AsyncIterator
 import uuid
@@ -96,16 +96,12 @@ app.include_router(router)
 
 @app.on_event("startup")
 @repeat_every(seconds=60, raise_exceptions=True)
-async def remove_temp_files():
-    def _foo():
-        current_time = time.time()
+def remove_temp_files():
+    current_time = time.time()
 
-        for f in os.listdir("/tmp/"):
-            creation_time = os.path.getctime(f)
-            if (current_time - creation_time) // 3600 >= 3:
-                os.unlink(f)
+    for f in os.listdir("/tmp/"):
+        target_path = f"/tmp/{f}"
 
-    loop = asyncio.get_event_loop()
-
-    with ThreadPoolExecutor(1) as executor:
-        await loop.run_in_executor(executor, _foo)
+        creation_time = os.path.getctime(target_path)
+        if (current_time - creation_time) // 3600 >= 3:
+            os.unlink(target_path)
