@@ -95,8 +95,8 @@ app.include_router(router)
 
 
 @app.on_event("startup")
-@repeat_every(seconds=60 * 60)
-async def remote_temp_files():
+@repeat_every(seconds=60, raise_exceptions=True)
+async def remove_temp_files():
     def _foo():
         current_time = time.time()
 
