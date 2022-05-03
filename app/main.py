@@ -1,6 +1,7 @@
 import asyncio
 import os
 import os.path
+import shutil
 import time
 from typing import AsyncIterator
 import uuid
@@ -99,9 +100,19 @@ app.include_router(router)
 def remove_temp_files():
     current_time = time.time()
 
+    try:
+        os.remove("./conversion.log")
+    except IOError:
+        pass
+
     for f in os.listdir("/tmp/"):
         target_path = f"/tmp/{f}"
 
+        is_file = os.path.isfile(target_path)
+
         creation_time = os.path.getctime(target_path)
         if (current_time - creation_time) // 3600 >= 3:
-            os.unlink(target_path)
+            if is_file:
+                os.remove(target_path)
+            else:
+                shutil.rmtree(target_path)
