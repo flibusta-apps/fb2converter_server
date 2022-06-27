@@ -106,7 +106,11 @@ def remove_temp_files():
 
         is_file = os.path.isfile(target_path)
 
-        creation_time = os.path.getctime(target_path)
+        try:
+            creation_time = os.path.getctime(target_path)
+        except FileNotFoundError:
+            continue
+
         if (current_time - creation_time) // 3600 >= 3:
             if is_file:
                 os.remove(target_path)
