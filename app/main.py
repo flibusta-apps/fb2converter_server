@@ -33,7 +33,9 @@ async def convert(
 ):
     format_lower = format.lower()
     if format_lower not in ["epub", "mobi"]:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Bad format!"
+        )
 
     temp_uuid = uuid.uuid1()
 
@@ -68,7 +70,9 @@ async def convert(
         except FileNotFoundError:
             pass
 
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Can't convert!"
+        )
 
     async def result_iterator() -> AsyncIterator[bytes]:
         try:
