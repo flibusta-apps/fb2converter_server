@@ -18,9 +18,10 @@ import sentry_sdk
 from config import env_config
 
 
-sentry_sdk.init(
-    env_config.SENTRY_DSN,
-)
+if env_config.SENTRY_DSN:
+    sentry_sdk.init(
+        env_config.SENTRY_DSN,
+    )
 
 
 router = APIRouter(tags=["converter"])
