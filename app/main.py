@@ -3,7 +3,7 @@ import os
 import os.path
 import shutil
 import time
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 import uuid
 
 from fastapi import FastAPI, APIRouter, File, UploadFile, Form, HTTPException, status
@@ -29,9 +29,14 @@ router = APIRouter(tags=["converter"])
 
 @router.post("/")
 async def convert(
-    file: UploadFile = File({}),
-    format: str = Form({}),
+    file: Optional[UploadFile] = File(None),
+    format: Optional[str] = Form(None),
 ):
+    if file is None or format is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="File and format required!"
+        )
+
     format_lower = format.lower()
     if format_lower not in ["epub", "mobi"]:
         raise HTTPException(
