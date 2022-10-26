@@ -1,4 +1,4 @@
-FROM python:3.10-slim as build-image
+FROM python:3.11-slim as build-image
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y unzip \
@@ -22,7 +22,7 @@ RUN python -m venv $VENV_PATH \
     && pip install -r requirements.txt --no-cache-dir
 
 
-FROM python:3.10-slim as runtime-image
+FROM python:3.11-slim as runtime-image
 
 WORKDIR /app
 
