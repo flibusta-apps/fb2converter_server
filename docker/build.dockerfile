@@ -1,7 +1,7 @@
 FROM python:3.11-slim as build-image
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y unzip \
+    && apt-get install --no-install-recommends -y unzip gcc build-essential python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Get converter bin
