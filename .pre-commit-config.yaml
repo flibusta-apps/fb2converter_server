@@ -11,3 +11,8 @@ repos:
   rev: 'v0.0.213'
   hooks:
     - id: ruff
+
+- repo: https://github.com/crate-ci/typos
+  rev: v1.13.6
+  hooks:
+    - id: typos
