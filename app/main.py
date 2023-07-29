@@ -88,7 +88,11 @@ async def convert(
         finally:
             await aiofiles.os.remove(converted_temp_filename)
 
-    return StreamingResponse(result_iterator())
+    result_size = await aiofiles.os.stat(converted_temp_filename)
+
+    return StreamingResponse(
+        result_iterator(), headers={"Content-Length": f"{result_size.st_size}"}
+    )
 
 
 @router.get("/healthcheck")
