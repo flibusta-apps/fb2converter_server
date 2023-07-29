@@ -1,4 +1,4 @@
-FROM python:3.11-slim as build-image
+FROM python:3.11-slim AS build-image
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y unzip gcc build-essential python3-dev \
@@ -6,7 +6,7 @@ RUN apt-get update \
 
 # Get converter bin
 WORKDIR  /root/fb2converter
-ADD https://github.com/rupor-github/fb2converter/releases/download/v1.67.1/fb2c_linux_amd64.zip ./
+ADD https://github.com/rupor-github/fb2converter/releases/download/v1.70.0/fb2c_linux_amd64.zip ./
 RUN unzip fb2c_linux_amd64.zip
 
 # Install requirements
@@ -22,7 +22,7 @@ RUN python -m venv $VENV_PATH \
     && pip install -r requirements.txt --no-cache-dir
 
 
-FROM python:3.11-slim as runtime-image
+FROM python:3.11-slim AS runtime-image
 
 WORKDIR /app
 
