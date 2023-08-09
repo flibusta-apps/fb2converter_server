@@ -183,6 +183,10 @@ async fn main() {
         .compact()
         .init();
 
+    let _guard = sentry::init(
+        std::env::var("SENTRY_DSN").unwrap_or_else(|_| panic!("Cannot get the {} env variable", env))
+    );
+
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 
     let app = get_router();
