@@ -184,7 +184,7 @@ async fn main() {
         .init();
 
     let _guard = sentry::init(
-        std::env::var("SENTRY_DSN").unwrap_or_else(|_| panic!("Cannot get the {} env variable", env))
+        std::env::var("SENTRY_DSN").unwrap_or_else(|_| panic!("Cannot get the SENTRY_DSN env variable"))
     );
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
