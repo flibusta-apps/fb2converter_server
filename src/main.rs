@@ -166,6 +166,7 @@ fn get_router() -> Router {
     Router::new()
         .route("/", post(convert_file))
         .route("/metrics", get(|| async move { metric_handle.render() }))
+        .layer(prometheus_layer)
 }
 
 
