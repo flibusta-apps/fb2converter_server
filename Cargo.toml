@@ -1,0 +1,22 @@
+[package]
+name = "fb2converter_server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.28.2", features = ["full"] }
+tokio-util = { version = "0.7.8", features = ["compat", "io"] }
+
+axum = { version = "0.6.18", features = ["multipart"] }
+axum-prometheus = "0.4.0"
+
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"]}
+tower-http = { version = "0.4.3", features = ["trace"] }
+
+sentry = "0.31.5"
+
+async-tempfile = "0.4.0"
+uuid = "1.4.1"

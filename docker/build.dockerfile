@@ -1,7 +1,7 @@
-FROM python:3.11-slim AS build-image
+FROM debian:bullseye-slim AS convert_downloader
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y unzip gcc build-essential python3-dev \
+    && apt-get install --no-install-recommends -y unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Get converter bin
@@ -9,34 +9,28 @@ WORKDIR  /root/fb2converter
 ADD https://github.com/rupor-github/fb2converter/releases/download/v1.70.0/fb2c_linux_amd64.zip ./
 RUN unzip fb2c_linux_amd64.zip
 
-# Install requirements
-WORKDIR /root/poetry
-COPY pyproject.toml poetry.lock /root/poetry/
 
-RUN pip install poetry wheel --no-cache-dir \
-    && poetry export --without-hashes > requirements.txt
-
-ENV VENV_PATH=/opt/venv
-RUN python -m venv $VENV_PATH \
-    && . /opt/venv/bin/activate \
-    && pip install -r requirements.txt --no-cache-dir
-
-
-FROM python:3.11-slim AS runtime-image
+FROM rust:bullseye AS builder
 
 WORKDIR /app
 
-COPY ./app/ ./
+COPY . .
 
-ENV VENV_PATH=/opt/venv
-ENV PATH="$VENV_PATH/bin:$PATH"
+RUN cargo build --release --bin fb2converter_server
 
-COPY --from=build-image /root/fb2converter/fb2c /app/bin/
-COPY --from=build-image /root/fb2converter/kindlegen /app/bin/
 
-COPY --from=build-image $VENV_PATH $VENV_PATH
-COPY ./scripts/healthcheck.py /root/healthcheck.py
+FROM debian:bullseye-slim
 
-EXPOSE 8080
+RUN apt-get update \
+    && apt-get install -y openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-CMD uvicorn main:app --host 0.0.0.0 --port 8080 --loop uvloop --timeout-keep-alive 600
+RUN update-ca-certificates
+
+WORKDIR /app
+
+COPY --from=convert_downloader /root/fb2converter/kindlegen /app/bin/
+COPY --from=convert_downloader /root/fb2converter/fb2c /app/bin/
+
+COPY --from=builder /app/target/release/fb2converter_server /usr/local/bin
+ENTRYPOINT ["/usr/local/bin/fb2converter_server"]
