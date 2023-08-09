@@ -1,5 +1,6 @@
 use std::{net::SocketAddr, time::SystemTime};
-use axum::{Router, routing::post, extract::Multipart, response::{IntoResponse, AppendHeaders}, http::{StatusCode, header}, body::StreamBody};
+use axum::{Router, routing::{post, get}, extract::Multipart, response::{IntoResponse, AppendHeaders}, http::{StatusCode, header}, body::StreamBody};
+use axum_prometheus::PrometheusMetricLayer;
 use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy}, process::Command};
 use tracing::{info, log};
 use async_tempfile::TempFile;
@@ -160,8 +161,11 @@ async fn convert_file(
 
 
 fn get_router() -> Router {
+    let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
+
     Router::new()
         .route("/", post(convert_file))
+        .route("/metrics", get(|| async move { metric_handle.render() }))
 }
 
 
