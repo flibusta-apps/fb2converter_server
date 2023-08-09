@@ -2,7 +2,8 @@ use std::{net::SocketAddr, time::SystemTime};
 use axum::{Router, routing::{post, get}, extract::Multipart, response::{IntoResponse, AppendHeaders}, http::{StatusCode, header}, body::StreamBody};
 use axum_prometheus::PrometheusMetricLayer;
 use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy}, process::Command};
-use tracing::{info, log};
+use tower_http::trace::{TraceLayer, self};
+use tracing::{info, log, Level};
 use async_tempfile::TempFile;
 use tokio_util::io::ReaderStream;
 
@@ -167,6 +168,11 @@ fn get_router() -> Router {
         .route("/", post(convert_file))
         .route("/metrics", get(|| async move { metric_handle.render() }))
         .layer(prometheus_layer)
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+        )
 }
 
 
