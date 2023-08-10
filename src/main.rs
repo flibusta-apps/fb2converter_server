@@ -1,6 +1,7 @@
-use std::{net::SocketAddr, time::SystemTime};
+use std::{net::SocketAddr, time::SystemTime, str::FromStr};
 use axum::{Router, routing::{post, get}, extract::Multipart, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
 use axum_prometheus::PrometheusMetricLayer;
+use sentry::{ClientOptions, types::Dsn, integrations::debug_images::DebugImagesIntegration};
 use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy}, process::Command};
 use tower_http::trace::{TraceLayer, self};
 use tracing::{info, log, Level};
@@ -210,9 +211,16 @@ async fn main() {
         .compact()
         .init();
 
-    let _guard = sentry::init(
-        std::env::var("SENTRY_DSN").unwrap_or_else(|_| panic!("Cannot get the SENTRY_DSN env variable"))
-    );
+    let options = ClientOptions {
+        dsn: Some(Dsn::from_str(
+            &std::env::var("SENTRY_DSN").unwrap_or_else(|_| panic!("Cannot get the SENTRY_DSN env variable"))).unwrap()
+        ),
+        default_integrations: false,
+        ..Default::default()
+    }
+    .add_integration(DebugImagesIntegration::new());
+
+    let _guard = sentry::init(options);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 
