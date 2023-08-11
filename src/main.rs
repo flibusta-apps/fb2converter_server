@@ -157,7 +157,7 @@ async fn convert_file(
     ]);
 
     tokio::spawn(async {
-        sleep(Duration::from_secs(60 * 60)).await;
+        sleep(Duration::from_secs(5 * 60)).await;
         remove_temp_files().await
     });
 
