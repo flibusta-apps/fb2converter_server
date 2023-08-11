@@ -82,7 +82,7 @@ async fn convert_file(
                     }
                 }
 
-                let _  =tempfile_rw.flush().await;
+                let _ = tempfile_rw.flush().await;
             },
             _ => panic!("unknown field")
         };
@@ -130,7 +130,7 @@ async fn convert_file(
         },
     };
 
-    let mut result_file = match File::open(format!("{prefix}.{file_format}")).await {
+    let mut result_file = match File::open(format!("/tmp/{prefix}.{file_format}")).await {
         Ok(v) => v,
         Err(err) => {
             log::error!("{:?}", err);
