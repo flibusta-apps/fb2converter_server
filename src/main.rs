@@ -1,8 +1,8 @@
-use std::{net::SocketAddr, time::SystemTime, str::FromStr};
+use std::{net::SocketAddr, time::{SystemTime, Duration}, str::FromStr};
 use axum::{Router, routing::{post, get}, extract::Multipart, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
 use axum_prometheus::PrometheusMetricLayer;
 use sentry::{ClientOptions, types::Dsn, integrations::debug_images::DebugImagesIntegration};
-use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy}, process::Command};
+use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy}, process::Command, time::sleep};
 use tower_http::trace::{TraceLayer, self};
 use tracing::{info, log, Level};
 use async_tempfile::TempFile;
@@ -156,7 +156,10 @@ async fn convert_file(
         )
     ]);
 
-    tokio::spawn(remove_temp_files());
+    tokio::spawn(async {
+        sleep(Duration::from_secs(60 * 60)).await;
+        remove_temp_files().await
+    });
 
     (headers, body).into_response()
 }
