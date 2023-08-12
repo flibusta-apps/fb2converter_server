@@ -21,3 +21,5 @@ async-tempfile = "0.4.0"
 uuid = "1.4.1"
 
 sentry = { version = "0.31.5", features = ["debug-images"] }
+
+tokio-cron-scheduler = "0.9.4"

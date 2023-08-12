@@ -1,9 +1,10 @@
-use std::{net::SocketAddr, time::{SystemTime, Duration}, str::FromStr, io::SeekFrom};
-use axum::{Router, routing::{post, get}, extract::{Multipart, Path, BodyStream}, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
+use std::{net::SocketAddr, str::FromStr, io::SeekFrom};
+use axum::{Router, routing::{post, get}, extract::{Path, BodyStream}, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
 use axum_prometheus::PrometheusMetricLayer;
 use futures_util::StreamExt;
 use sentry::{ClientOptions, types::Dsn, integrations::debug_images::DebugImagesIntegration};
-use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy, AsyncSeekExt}, process::Command, time::sleep};
+use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, AsyncSeekExt}, process::Command};
+use tokio_cron_scheduler::{JobScheduler, Job};
 use tower_http::trace::{TraceLayer, self};
 use tracing::{info, log, Level};
 use async_tempfile::TempFile;
@@ -11,18 +12,10 @@ use tokio_util::io::ReaderStream;
 
 
 async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let _ = remove_file("./conversion.log").await?;
-
     let mut dir = read_dir("/tmp/").await?;
-
-    let now = SystemTime::now();
 
     while let Some(child) = dir.next_entry().await? {
         let metadata = child.metadata().await?;
-
-        if now.duration_since(metadata.modified()?)?.as_secs() < 60 * 60 * 3 {
-            continue;
-        }
 
         if metadata.is_dir() {
             let _ = remove_dir(child.path()).await;
@@ -126,11 +119,6 @@ async fn convert_file(
         )
     ]);
 
-    // tokio::spawn(async {
-    //     sleep(Duration::from_secs(5 * 60)).await;
-    //     remove_temp_files().await
-    // });
-
     (headers, body).into_response()
 }
 
@@ -177,6 +165,45 @@ fn get_router() -> Router {
 }
 
 
+async fn cron_jobs() {
+    let job_scheduler = JobScheduler::new().await.unwrap();
+
+    let remote_temp_files_job = match Job::new_async("0 0 */6 * * *", |_uuid, _l| Box::pin(async {
+        match remove_temp_files().await {
+            Ok(_) => log::info!("Updated"),
+            Err(err) => log::info!("Update err: {:?}", err),
+        };
+    })) {
+        Ok(v) => v,
+        Err(err) => panic!("{:?}", err),
+    };
+
+    job_scheduler.add(remote_temp_files_job).await.unwrap();
+
+    log::info!("Scheduler start...");
+    match job_scheduler.start().await {
+        Ok(v) => v,
+        Err(err) => panic!("{:?}", err),
+    };
+
+    log::info!("Scheduler shutdown...");
+}
+
+
+async fn start_app() {
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+
+    let app = get_router();
+
+    info!("Start webserver...");
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+    info!("Webserver shutdown...");
+}
+
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -195,14 +222,8 @@ async fn main() {
 
     let _guard = sentry::init(options);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-
-    let app = get_router();
-
-    info!("Start webserver...");
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-    info!("Webserver shutdown...")
+    tokio::join![
+        cron_jobs(),
+        start_app()
+    ];
 }
