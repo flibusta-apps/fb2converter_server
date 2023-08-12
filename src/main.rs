@@ -1,9 +1,9 @@
-use std::{net::SocketAddr, time::{SystemTime, Duration}, str::FromStr};
+use std::{net::SocketAddr, time::{SystemTime, Duration}, str::FromStr, io::SeekFrom};
 use axum::{Router, routing::{post, get}, extract::{Multipart, Path, BodyStream}, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
 use axum_prometheus::PrometheusMetricLayer;
 use futures_util::StreamExt;
 use sentry::{ClientOptions, types::Dsn, integrations::debug_images::DebugImagesIntegration};
-use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy}, process::Command, time::sleep};
+use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy, AsyncSeekExt}, process::Command, time::sleep};
 use tower_http::trace::{TraceLayer, self};
 use tracing::{info, log, Level};
 use async_tempfile::TempFile;
@@ -105,22 +105,6 @@ async fn convert_file(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    let result_tempfile = match TempFile::new().await {
-        Ok(v) => v,
-        Err(err) => {
-            log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        },
-    };
-
-    let mut result_tempfile_rw = match result_tempfile.open_rw().await {
-        Ok(v) => v,
-        Err(err) => {
-            log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        },
-    };
-
     let mut result_file = match File::open(format!("/tmp/{prefix}.{file_format}")).await {
         Ok(v) => v,
         Err(err) => {
@@ -129,15 +113,10 @@ async fn convert_file(
         },
     };
 
-    let content_len = match copy(&mut result_file, &mut result_tempfile_rw).await {
-        Ok(v) => v,
-        Err(err) => {
-            log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        },
-    };
+    let content_len = result_file.seek(SeekFrom::End(0)).await.unwrap();
+    let _  = result_file.seek(SeekFrom::Start(0)).await;
 
-    let stream = ReaderStream::new(result_tempfile_rw);
+    let stream = ReaderStream::new(result_file);
     let body = StreamBody::new(stream);
 
     let headers = AppendHeaders([
