@@ -110,7 +110,9 @@ async fn convert_file(
             },
         };
 
+
     if status_code.code().unwrap() != 0 {
+        log::error!("{:?}", status_code);
         return StatusCode::BAD_REQUEST.into_response();
     }
 
