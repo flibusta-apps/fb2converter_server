@@ -294,6 +294,7 @@ dependencies = [
  "async-tempfile",
  "axum",
  "axum-prometheus",
+ "futures-util",
  "sentry",
  "tokio",
  "tokio-util",

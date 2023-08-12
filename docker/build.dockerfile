@@ -6,7 +6,7 @@ RUN apt-get update \
 
 # Get converter bin
 WORKDIR  /root/fb2converter
-ADD https://github.com/rupor-github/fb2converter/releases/download/v1.70.0/fb2c_linux_amd64.zip ./
+ADD https://github.com/rupor-github/fb2converter/releases/download/v1.71.0/fb2c_linux_amd64.zip ./
 RUN unzip fb2c_linux_amd64.zip
 
 

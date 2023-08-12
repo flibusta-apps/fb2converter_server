@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, time::{SystemTime, Duration}, str::FromStr};
-use axum::{Router, routing::{post, get}, extract::Multipart, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
+use axum::{Router, routing::{post, get}, extract::{Multipart, Path, BodyStream}, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
 use axum_prometheus::PrometheusMetricLayer;
+use futures_util::StreamExt;
 use sentry::{ClientOptions, types::Dsn, integrations::debug_images::DebugImagesIntegration};
 use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, copy}, process::Command, time::sleep};
 use tower_http::trace::{TraceLayer, self};
@@ -35,10 +36,9 @@ async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sy
 
 
 async fn convert_file(
-    mut multipart: Multipart
+    Path(file_format): Path<String>,
+    mut stream: BodyStream
 ) -> impl IntoResponse {
-    let mut file_format: Option<String> = None;
-
     let prefix = uuid::Uuid::new_v4().to_string();
 
     let tempfile = match TempFile::new_with_name(
@@ -51,44 +51,33 @@ async fn convert_file(
         },
     };
 
-    while let Some(mut field) = multipart.next_field().await.unwrap() {
-        let name = field.name().unwrap().to_string();
+    let mut tempfile_rw = match tempfile.open_rw().await {
+        Ok(v) => v,
+        Err(err) => {
+            log::error!("{:?}", err);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        },
+    };
 
-        match name.as_str() {
-            "format" => {
-                file_format = Some(field.text().await.unwrap());
+    while let Some(chunk) = stream.next().await {
+        let data = match chunk {
+            Ok(v) => v,
+            Err(err) => {
+                log::error!("{:?}", err);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response()
             },
-            "file" => {
-                let mut tempfile_rw = match tempfile.open_rw().await {
-                    Ok(v) => v,
-                    Err(err) => {
-                        log::error!("{:?}", err);
-                        return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-                    },
-                };
-
-                while let Ok(result) = field.chunk().await {
-                    let data = match result {
-                        Some(v) => v,
-                        None => break,
-                    };
-
-                    match tempfile_rw.write(data.as_ref()).await {
-                        Ok(_) => (),
-                        Err(err) => {
-                            log::error!("{:?}", err);
-                            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-                        },
-                    }
-                }
-
-                let _ = tempfile_rw.flush().await;
-            },
-            _ => panic!("unknown field")
         };
+
+        match tempfile_rw.write(data.as_ref()).await {
+            Ok(_) => (),
+            Err(err) => {
+                log::error!("{:?}", err);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            },
+        }
     }
 
-    let file_format = file_format.unwrap();
+    let _ = tempfile_rw.flush().await;
 
     let allowed_formats = vec!["epub".to_string(), "mobi".to_string()];
     if !allowed_formats.contains(&file_format.clone().to_lowercase()) {
@@ -191,7 +180,7 @@ fn get_router() -> Router {
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
 
     let app_router = Router::new()
-        .route("/", post(convert_file))
+        .route("/:file_format", post(convert_file))
         .layer(middleware::from_fn(auth))
         .layer(prometheus_layer);
 
