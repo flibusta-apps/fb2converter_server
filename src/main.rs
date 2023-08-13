@@ -170,8 +170,8 @@ async fn cron_jobs() {
 
     let remote_temp_files_job = match Job::new_async("0 0 */6 * * *", |_uuid, _l| Box::pin(async {
         match remove_temp_files().await {
-            Ok(_) => log::info!("Updated"),
-            Err(err) => log::info!("Update err: {:?}", err),
+            Ok(_) => log::info!("Temp files deleted!"),
+            Err(err) => log::info!("Temp files deleting error: {:?}", err),
         };
     })) {
         Ok(v) => v,
