@@ -1,15 +1,26 @@
-use std::{net::SocketAddr, str::FromStr, io::SeekFrom};
-use axum::{Router, routing::{post, get}, extract::{Path, BodyStream}, response::{IntoResponse, AppendHeaders, Response}, http::{StatusCode, header, Request, self}, body::StreamBody, middleware::{Next, self}};
+use async_tempfile::TempFile;
+use axum::{
+    body::StreamBody,
+    extract::{BodyStream, Path},
+    http::{self, header, Request, StatusCode},
+    middleware::{self, Next},
+    response::{AppendHeaders, IntoResponse, Response},
+    routing::{get, post},
+    Router,
+};
 use axum_prometheus::PrometheusMetricLayer;
 use futures_util::StreamExt;
-use sentry::{ClientOptions, types::Dsn, integrations::debug_images::DebugImagesIntegration};
-use tokio::{fs::{remove_file, read_dir, remove_dir, File}, io::{AsyncWriteExt, AsyncSeekExt}, process::Command};
-use tokio_cron_scheduler::{JobScheduler, Job};
-use tower_http::trace::{TraceLayer, self};
-use tracing::{info, log, Level};
-use async_tempfile::TempFile;
+use sentry::{integrations::debug_images::DebugImagesIntegration, types::Dsn, ClientOptions};
+use std::{io::SeekFrom, net::SocketAddr, str::FromStr};
+use tokio::{
+    fs::{read_dir, remove_dir, remove_file, File},
+    io::{AsyncSeekExt, AsyncWriteExt},
+    process::Command,
+};
+use tokio_cron_scheduler::{Job, JobScheduler};
 use tokio_util::io::ReaderStream;
-
+use tower_http::trace::{self, TraceLayer};
+use tracing::{info, log, Level};
 
 async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut dir = read_dir("/tmp/").await?;
@@ -27,29 +38,26 @@ async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sy
     Ok(())
 }
 
-
 async fn convert_file(
     Path(file_format): Path<String>,
-    mut stream: BodyStream
+    mut stream: BodyStream,
 ) -> impl IntoResponse {
     let prefix = uuid::Uuid::new_v4().to_string();
 
-    let tempfile = match TempFile::new_with_name(
-        format!("{prefix}.fb2")
-    ).await {
+    let tempfile = match TempFile::new_with_name(format!("{prefix}.fb2")).await {
         Ok(v) => v,
         Err(err) => {
             log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        },
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
     let mut tempfile_rw = match tempfile.open_rw().await {
         Ok(v) => v,
         Err(err) => {
             log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        },
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
     while let Some(chunk) = stream.next().await {
@@ -57,16 +65,16 @@ async fn convert_file(
             Ok(v) => v,
             Err(err) => {
                 log::error!("{:?}", err);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-            },
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
         };
 
         match tempfile_rw.write(data.as_ref()).await {
             Ok(_) => (),
             Err(err) => {
                 log::error!("{:?}", err);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-            },
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
         }
     }
 
@@ -84,14 +92,14 @@ async fn convert_file(
         .arg(&file_format)
         .arg(tempfile.file_path())
         .status()
-        .await {
-            Ok(v) => v,
-            Err(err) => {
-                log::error!("{:?}", err);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            },
-        };
-
+        .await
+    {
+        Ok(v) => v,
+        Err(err) => {
+            log::error!("{:?}", err);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
     if status_code.code().unwrap() != 0 {
         log::error!("{:?}", status_code);
@@ -102,26 +110,20 @@ async fn convert_file(
         Ok(v) => v,
         Err(err) => {
             log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        },
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
     let content_len = result_file.seek(SeekFrom::End(0)).await.unwrap();
-    let _  = result_file.seek(SeekFrom::Start(0)).await;
+    let _ = result_file.seek(SeekFrom::Start(0)).await;
 
     let stream = ReaderStream::new(result_file);
     let body = StreamBody::new(stream);
 
-    let headers = AppendHeaders([
-        (
-            header::CONTENT_LENGTH,
-            content_len
-        )
-    ]);
+    let headers = AppendHeaders([(header::CONTENT_LENGTH, content_len)]);
 
     (headers, body).into_response()
 }
-
 
 async fn auth<B>(req: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
     let auth_header = req
@@ -135,13 +137,15 @@ async fn auth<B>(req: Request<B>, next: Next<B>) -> Result<Response, StatusCode>
         return Err(StatusCode::UNAUTHORIZED);
     };
 
-    if auth_header != std::env::var("API_KEY").unwrap_or_else(|_| panic!("Cannot get the API_KEY env variable")) {
+    if auth_header
+        != std::env::var("API_KEY")
+            .unwrap_or_else(|_| panic!("Cannot get the API_KEY env variable"))
+    {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
     Ok(next.run(req).await)
 }
-
 
 fn get_router() -> Router {
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
@@ -164,16 +168,17 @@ fn get_router() -> Router {
         )
 }
 
-
 async fn cron_jobs() {
     let job_scheduler = JobScheduler::new().await.unwrap();
 
-    let remote_temp_files_job = match Job::new_async("0 0 */6 * * *", |_uuid, _l| Box::pin(async {
-        match remove_temp_files().await {
-            Ok(_) => log::info!("Temp files deleted!"),
-            Err(err) => log::info!("Temp files deleting error: {:?}", err),
-        };
-    })) {
+    let remote_temp_files_job = match Job::new_async("0 0 */6 * * *", |_uuid, _l| {
+        Box::pin(async {
+            match remove_temp_files().await {
+                Ok(_) => log::info!("Temp files deleted!"),
+                Err(err) => log::info!("Temp files deleting error: {:?}", err),
+            };
+        })
+    }) {
         Ok(v) => v,
         Err(err) => panic!("{:?}", err),
     };
@@ -189,7 +194,6 @@ async fn cron_jobs() {
     log::info!("Scheduler shutdown...");
 }
 
-
 async fn start_app() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 
@@ -203,7 +207,6 @@ async fn start_app() {
     info!("Webserver shutdown...");
 }
 
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -212,8 +215,12 @@ async fn main() {
         .init();
 
     let options = ClientOptions {
-        dsn: Some(Dsn::from_str(
-            &std::env::var("SENTRY_DSN").unwrap_or_else(|_| panic!("Cannot get the SENTRY_DSN env variable"))).unwrap()
+        dsn: Some(
+            Dsn::from_str(
+                &std::env::var("SENTRY_DSN")
+                    .unwrap_or_else(|_| panic!("Cannot get the SENTRY_DSN env variable")),
+            )
+            .unwrap(),
         ),
         default_integrations: false,
         ..Default::default()
@@ -222,8 +229,5 @@ async fn main() {
 
     let _guard = sentry::init(options);
 
-    tokio::join![
-        cron_jobs(),
-        start_app()
-    ];
+    tokio::join![cron_jobs(), start_app()];
 }
