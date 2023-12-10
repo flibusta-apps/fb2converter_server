@@ -1,7 +1,7 @@
 use async_tempfile::TempFile;
 use axum::{
-    body::StreamBody,
-    extract::{BodyStream, Path},
+    body::Body,
+    extract::Path,
     http::{self, header, Request, StatusCode},
     middleware::{self, Next},
     response::{AppendHeaders, IntoResponse, Response},
@@ -38,10 +38,7 @@ async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sy
     Ok(())
 }
 
-async fn convert_file(
-    Path(file_format): Path<String>,
-    mut stream: BodyStream,
-) -> impl IntoResponse {
+async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoResponse {
     let prefix = uuid::Uuid::new_v4().to_string();
 
     let tempfile = match TempFile::new_with_name(format!("{prefix}.fb2")).await {
@@ -60,7 +57,9 @@ async fn convert_file(
         }
     };
 
-    while let Some(chunk) = stream.next().await {
+    let mut data_stream = body.into_data_stream();
+
+    while let Some(chunk) = data_stream.next().await {
         let data = match chunk {
             Ok(v) => v,
             Err(err) => {
@@ -118,14 +117,13 @@ async fn convert_file(
     let _ = result_file.seek(SeekFrom::Start(0)).await;
 
     let stream = ReaderStream::new(result_file);
-    let body = StreamBody::new(stream);
 
     let headers = AppendHeaders([(header::CONTENT_LENGTH, content_len)]);
 
-    (headers, body).into_response()
+    (headers, Body::from_stream(stream)).into_response()
 }
 
-async fn auth<B>(req: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
+async fn auth(req: Request<axum::body::Body>, next: Next) -> Result<Response, StatusCode> {
     let auth_header = req
         .headers()
         .get(http::header::AUTHORIZATION)
@@ -200,10 +198,8 @@ async fn start_app() {
     let app = get_router();
 
     info!("Start webserver...");
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
     info!("Webserver shutdown...");
 }
 
