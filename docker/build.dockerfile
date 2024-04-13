@@ -29,8 +29,11 @@ RUN update-ca-certificates
 
 WORKDIR /app
 
+COPY ./scripts/*.sh /
+RUN chmod +x /*.sh
+
 COPY --from=convert_downloader /root/fb2converter/kindlegen /app/bin/
 COPY --from=convert_downloader /root/fb2converter/fb2c /app/bin/
 
 COPY --from=builder /app/target/release/fb2converter_server /usr/local/bin
-ENTRYPOINT ["/usr/local/bin/fb2converter_server"]
+CMD ["/start.sh"]
