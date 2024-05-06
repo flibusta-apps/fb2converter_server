@@ -11,6 +11,7 @@ use axum::{
 use axum_prometheus::PrometheusMetricLayer;
 use futures_util::StreamExt;
 use sentry::{integrations::debug_images::DebugImagesIntegration, types::Dsn, ClientOptions};
+use sentry_tracing::EventFilter;
 use std::{io::SeekFrom, net::SocketAddr, str::FromStr};
 use tokio::{
     fs::{read_dir, remove_dir, remove_file, File},
@@ -21,6 +22,7 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use tokio_util::io::ReaderStream;
 use tower_http::trace::{self, TraceLayer};
 use tracing::{info, log, Level};
+use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
 async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut dir = read_dir("/tmp/").await?;
@@ -205,11 +207,6 @@ async fn start_app() {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .compact()
-        .init();
-
     let options = ClientOptions {
         dsn: Some(
             Dsn::from_str(
@@ -224,6 +221,17 @@ async fn main() {
     .add_integration(DebugImagesIntegration::new());
 
     let _guard = sentry::init(options);
+
+    let sentry_layer = sentry_tracing::layer().event_filter(|md| match md.level() {
+        &tracing::Level::ERROR => EventFilter::Event,
+        _ => EventFilter::Ignore,
+    });
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_target(false))
+        .with(filter::LevelFilter::INFO)
+        .with(sentry_layer)
+        .init();
 
     tokio::join![cron_jobs(), start_app()];
 }

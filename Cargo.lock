@@ -333,6 +333,7 @@ dependencies = [
  "axum-prometheus",
  "futures-util",
  "sentry",
+ "sentry-tracing",
  "tokio",
  "tokio-cron-scheduler",
  "tokio-util",
