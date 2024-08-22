@@ -64,24 +64,22 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
     while let Some(chunk) = data_stream.next().await {
         let data = match chunk {
             Ok(v) => v,
-            Err(err) => {
-                log::error!("{:?}", err);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            Err(_err) => {
+                return StatusCode::BAD_REQUEST.into_response();
             }
         };
 
         match tempfile_rw.write(data.as_ref()).await {
             Ok(_) => (),
-            Err(err) => {
-                log::error!("{:?}", err);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            Err(_err) => {
+                return StatusCode::NO_CONTENT.into_response();
             }
         }
     }
 
     let _ = tempfile_rw.flush().await;
 
-    let allowed_formats = vec!["epub".to_string(), "mobi".to_string()];
+    let allowed_formats = ["epub".to_string(), "mobi".to_string()];
     if !allowed_formats.contains(&file_format.clone().to_lowercase()) {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -96,9 +94,8 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
         .await
     {
         Ok(v) => v,
-        Err(err) => {
-            log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        Err(_err) => {
+            return StatusCode::NO_CONTENT.into_response();
         }
     };
 
@@ -109,9 +106,8 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
 
     let mut result_file = match File::open(format!("/tmp/{prefix}.{file_format}")).await {
         Ok(v) => v,
-        Err(err) => {
-            log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        Err(_err) => {
+            return StatusCode::NO_CONTENT.into_response();
         }
     };
 
