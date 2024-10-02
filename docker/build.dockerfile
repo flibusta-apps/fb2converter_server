@@ -7,7 +7,7 @@ RUN apt-get update \
 # Get converter bin
 WORKDIR  /root/fb2converter
 ADD https://github.com/rupor-github/fb2converter/releases/download/v1.75.4/fb2c-linux-amd64.zip ./
-RUN unzip fb2c_linux_amd64.zip
+RUN unzip fb2c-linux-amd64.zip
 
 
 FROM rust:bullseye AS builder
