@@ -6,21 +6,21 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.40.0", features = ["full"] }
-tokio-util = { version = "0.7.12", features = ["compat", "io"] }
-futures-util = "0.3.30"
+tokio = { version = "1.42.0", features = ["full"] }
+tokio-util = { version = "0.7.13", features = ["compat", "io"] }
+futures-util = "0.3.31"
 
-axum = { version = "0.7.7", features = ["multipart"] }
+axum = { version = "0.7.9", features = ["multipart"] }
 axum-prometheus = "0.7.0"
 
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"]}
-sentry-tracing = "0.34.0"
-tower-http = { version = "0.6.1", features = ["trace"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"]}
+sentry-tracing = "0.35.0"
+tower-http = { version = "0.6.2", features = ["trace"] }
 
 async-tempfile = "0.6.0"
-uuid = "1.10.0"
+uuid = "1.11.0"
 
-sentry = { version = "0.34.0", features = ["debug-images"] }
+sentry = { version = "0.35.0", features = ["debug-images"] }
 
 tokio-cron-scheduler = "0.13.0"
