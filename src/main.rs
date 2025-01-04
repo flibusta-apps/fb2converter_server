@@ -147,7 +147,7 @@ fn get_router() -> Router {
     let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
 
     let app_router = Router::new()
-        .route("/:file_format", post(convert_file))
+        .route("/{file_format}", post(convert_file))
         .layer(middleware::from_fn(auth))
         .layer(prometheus_layer);
 
