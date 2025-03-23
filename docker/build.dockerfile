@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim AS convert_downloader
+FROM debian:bookworm-slim AS convert_downloader
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y unzip \
@@ -10,7 +10,7 @@ ADD https://github.com/rupor-github/fb2converter/releases/download/v1.75.4/fb2c-
 RUN unzip fb2c-linux-amd64.zip
 
 
-FROM rust:bullseye AS builder
+FROM rust:bookworm AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ COPY . .
 RUN cargo build --release --bin fb2converter_server
 
 
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y openssl ca-certificates curl jq \
