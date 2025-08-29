@@ -27,7 +27,7 @@ axum = { version = "0.8.1", features = ["multipart"] }
 axum-prometheus = "0.8.0"
 
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"]}
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"]}
 sentry-tracing = "0.41.0"
 tower-http = { version = "0.6.2", features = ["trace"] }
 
