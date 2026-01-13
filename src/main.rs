@@ -40,6 +40,10 @@ async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sy
     Ok(())
 }
 
+async fn health_check() -> impl IntoResponse {
+    (StatusCode::OK, "OK")
+}
+
 async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoResponse {
     let prefix = uuid::Uuid::new_v4().to_string();
 
@@ -154,11 +158,17 @@ fn get_router() -> Router {
     let metric_router =
         Router::new().route("/metrics", get(|| async move { metric_handle.render() }));
 
-    Router::new().merge(app_router).merge(metric_router).layer(
-        TraceLayer::new_for_http()
-            .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
-            .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
-    )
+    let health_router = Router::new().route("/health", get(health_check));
+
+    Router::new()
+        .merge(app_router)
+        .merge(metric_router)
+        .merge(health_router)
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+        )
 }
 
 async fn cron_jobs() {
