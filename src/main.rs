@@ -84,7 +84,7 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
     let _ = tempfile_rw.flush().await;
 
     let allowed_formats = ["epub".to_string(), "mobi".to_string()];
-    if !allowed_formats.contains(&file_format.clone().to_lowercase()) {
+    if !allowed_formats.contains(&file_format.to_lowercase()) {
         return StatusCode::BAD_REQUEST.into_response();
     }
 
@@ -98,20 +98,29 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
         .await
     {
         Ok(v) => v,
-        Err(_err) => {
-            return StatusCode::NO_CONTENT.into_response();
+        Err(err) => {
+            log::error!("Failed to execute fb2c: {:?}", err);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
 
-    if status_code.code().unwrap() != 0 {
-        log::error!("{:?}", status_code);
-        return StatusCode::BAD_REQUEST.into_response();
+    match status_code.code() {
+        Some(0) => {}
+        Some(_) => {
+            log::error!("{:?}", status_code);
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        None => {
+            log::error!("Process terminated by signal: {:?}", status_code);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     }
 
     let mut result_file = match File::open(format!("/tmp/{prefix}.{file_format}")).await {
         Ok(v) => v,
-        Err(_err) => {
-            return StatusCode::NO_CONTENT.into_response();
+        Err(err) => {
+            log::error!("Failed to open result file: {:?}", err);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
 
