@@ -14,7 +14,7 @@ use sentry::{integrations::debug_images::DebugImagesIntegration, types::Dsn, Cli
 use sentry_tracing::EventFilter;
 use std::{io::SeekFrom, net::SocketAddr, str::FromStr};
 use tokio::{
-    fs::{read_dir, remove_dir, remove_file, File},
+    fs::{create_dir, read_dir, remove_dir_all, remove_file, File},
     io::{AsyncSeekExt, AsyncWriteExt},
     process::Command,
 };
@@ -28,10 +28,18 @@ async fn remove_temp_files() -> Result<(), Box<dyn std::error::Error + Send + Sy
     let mut dir = read_dir("/tmp/").await?;
 
     while let Some(child) = dir.next_entry().await? {
+        let file_name = child.file_name();
+        let name = file_name.to_string_lossy();
+
+        // Only clean up files/dirs created by this service (UUID-prefixed)
+        if !name.contains('-') {
+            continue;
+        }
+
         let metadata = child.metadata().await?;
 
         if metadata.is_dir() {
-            let _ = remove_dir(child.path()).await;
+            let _ = remove_dir_all(child.path()).await;
         } else {
             let _ = remove_file(child.path()).await;
         }
@@ -47,13 +55,22 @@ async fn health_check() -> impl IntoResponse {
 async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoResponse {
     let prefix = uuid::Uuid::new_v4().to_string();
 
-    let tempfile = match TempFile::new_with_name(format!("{prefix}.fb2")).await {
-        Ok(v) => v,
-        Err(err) => {
-            log::error!("{:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    let output_dir = format!("/tmp/{prefix}");
+    if let Err(err) = create_dir(&output_dir).await {
+        log::error!("Failed to create output directory: {:?}", err);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let tempfile =
+        match TempFile::new_with_name_in(format!("{prefix}.fb2"), std::path::Path::new("/tmp/"))
+            .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                log::error!("{:?}", err);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
 
     let mut tempfile_rw = match tempfile.open_rw().await {
         Ok(v) => v,
@@ -89,11 +106,11 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
     }
 
     let status_code = match Command::new("/app/bin/fb2c")
-        .current_dir("/tmp/")
         .arg("convert")
         .arg("--to")
         .arg(&file_format)
         .arg(tempfile.file_path())
+        .arg(&output_dir)
         .status()
         .await
     {
@@ -116,7 +133,47 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
         }
     }
 
-    let mut result_file = match File::open(format!("/tmp/{prefix}.{file_format}")).await {
+    // fb2c determines the output filename from the book's metadata, not from the input filename.
+    // Find the converted file in the output directory by extension.
+    let result_path = {
+        let mut dir = match read_dir(&output_dir).await {
+            Ok(v) => v,
+            Err(err) => {
+                log::error!("Failed to read output directory: {:?}", err);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+        let mut found: Option<std::path::PathBuf> = None;
+        loop {
+            match dir.next_entry().await {
+                Ok(Some(entry)) => {
+                    let path = entry.path();
+                    if let Some(ext) = path.extension() {
+                        if ext.eq_ignore_ascii_case(&file_format) {
+                            found = Some(path);
+                            break;
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    log::error!("Failed to read output directory entry: {:?}", err);
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            }
+        }
+
+        match found {
+            Some(p) => p,
+            None => {
+                log::error!("No .{file_format} file found in output directory");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        }
+    };
+
+    let mut result_file = match File::open(&result_path).await {
         Ok(v) => v,
         Err(err) => {
             log::error!("Failed to open result file: {:?}", err);
@@ -130,6 +187,14 @@ async fn convert_file(Path(file_format): Path<String>, body: Body) -> impl IntoR
     let stream = ReaderStream::new(result_file);
 
     let headers = AppendHeaders([(header::CONTENT_LENGTH, content_len)]);
+
+    // Clean up output directory and temp file after streaming starts.
+    // The TempFile will be dropped when it goes out of scope, but we also
+    // need to clean up the output directory.
+    let output_dir_clone = output_dir.clone();
+    tokio::spawn(async move {
+        let _ = remove_dir_all(&output_dir_clone).await;
+    });
 
     (headers, Body::from_stream(stream)).into_response()
 }
