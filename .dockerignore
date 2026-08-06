@@ -1,0 +1,9 @@
+target/
+.git/
+.github/
+docs/
+*.env
+.env*
+.DS_Store
+.zed
+*.md
