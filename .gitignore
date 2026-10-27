@@ -3,5 +3,7 @@ venv
 # Added by cargo
 
 /target
+.env
+.env*
 
 .zed
