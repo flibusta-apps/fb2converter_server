@@ -23,7 +23,7 @@ tokio-util = { version = "0.7.14", features = ["compat", "io"] }
 futures-util = "0.3.31"
 
 axum = { version = "0.8.1" }
-axum-prometheus = "0.9.0"
+axum-prometheus = "0.10.1"
 metrics = "0.24"
 
 tracing = "0.1.41"
