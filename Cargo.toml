@@ -36,7 +36,7 @@ libc = "0.2"
 
 sentry = { version = "0.42.0", features = ["debug-images"] }
 
-tokio-cron-scheduler = "0.14.0"
+tokio-cron-scheduler = "0.15.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
