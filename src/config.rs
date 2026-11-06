@@ -58,6 +58,8 @@ pub struct Config {
     /// Maximum size of a produced output file before it is rejected instead
     /// of streamed back. See `MAX_OUTPUT_BYTES`.
     pub max_output_bytes: u64,
+    pub job_max_disk_bytes: u64,
+    pub body_idle_timeout_secs: u64,
 
     /// Minimum age (in seconds) a job entry must have before the cleanup
     /// cron is allowed to delete it. See `CLEANUP_MAX_AGE_SECS`.
@@ -84,23 +86,37 @@ impl Config {
             );
         }
 
+        let jobs_dir = PathBuf::from(std::env::var("JOBS_DIR").unwrap_or_else(|_| "/tmp".into()));
+        std::fs::create_dir_all(&jobs_dir).map_err(|e| format!("Cannot create JOBS_DIR: {e}"))?;
+        let jobs_dir = jobs_dir
+            .canonicalize()
+            .map_err(|e| format!("Cannot resolve JOBS_DIR: {e}"))?;
+        let mut fb2c_bin =
+            PathBuf::from(std::env::var("FB2C_BIN").unwrap_or_else(|_| "/app/bin/fb2c".into()));
+        if fb2c_bin.is_relative() && fb2c_bin.as_os_str().as_encoded_bytes().contains(&b'/') {
+            fb2c_bin = std::env::current_dir()
+                .map_err(|e| e.to_string())?
+                .join(fb2c_bin);
+        }
+        let max_output_bytes = get_env_parsed_or::<u64>("MAX_OUTPUT_BYTES", 200 * 1024 * 1024)?;
         Ok(Config {
             api_key,
             sentry_dsn,
 
-            fb2c_bin: PathBuf::from(
-                std::env::var("FB2C_BIN").unwrap_or_else(|_| "/app/bin/fb2c".to_string()),
-            ),
-            jobs_dir: PathBuf::from(
-                std::env::var("JOBS_DIR").unwrap_or_else(|_| "/tmp".to_string()),
-            ),
+            fb2c_bin,
+            jobs_dir,
 
             max_body_bytes: get_env_parsed_or("MAX_BODY_BYTES", 50 * 1024 * 1024)?,
             body_read_timeout_secs: get_env_positive_u64_or("BODY_READ_TIMEOUT_SECS", 60)?,
             fb2c_timeout_secs: get_env_positive_u64_or("FB2C_TIMEOUT_SECS", 90)?,
             max_concurrent_conversions,
             queue_wait_secs: get_env_parsed_or("QUEUE_WAIT_SECS", 20)?,
-            max_output_bytes: get_env_parsed_or("MAX_OUTPUT_BYTES", 200 * 1024 * 1024)?,
+            max_output_bytes,
+            job_max_disk_bytes: get_env_positive_u64_or(
+                "JOB_MAX_DISK_BYTES",
+                max_output_bytes.saturating_mul(4).max(1),
+            )?,
+            body_idle_timeout_secs: get_env_positive_u64_or("BODY_IDLE_TIMEOUT_SECS", 60)?,
             cleanup_max_age_secs: get_env_parsed_or("CLEANUP_MAX_AGE_SECS", 3600)?,
         })
     }

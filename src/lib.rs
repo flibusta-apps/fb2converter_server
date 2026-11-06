@@ -24,7 +24,6 @@ use tokio::{
     process::Command,
     sync::Semaphore,
 };
-use tokio_util::io::ReaderStream;
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     trace::{self, TraceLayer},
@@ -37,16 +36,76 @@ const ALLOWED_FORMATS: [&str; 2] = ["epub", "mobi"];
 /// Maximum number of bytes of `fb2c` stderr that are captured and logged.
 const STDERR_CAP: usize = 8 * 1024;
 
+fn idle_timeout_stream(
+    mut reader: std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    idle: Duration,
+) -> impl futures_util::Stream<Item = std::io::Result<axum::body::Bytes>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    tokio::spawn(async move {
+        let _permit = permit;
+        loop {
+            let progress = async {
+                let mut buf = vec![0; 64 * 1024];
+                let n = reader.read(&mut buf).await?;
+                if n == 0 {
+                    return Ok(false);
+                }
+                buf.truncate(n);
+                Ok::<_, std::io::Error>(tx.send(Ok(axum::body::Bytes::from(buf))).await.is_ok())
+            };
+            tokio::select! {
+                _ = tx.closed() => break,
+                result = tokio::time::timeout(idle, progress) => match result {
+                    Ok(Ok(true)) => {},
+                    Ok(Ok(false)) => break,
+                    Ok(Err(e)) => { let _ = tx.try_send(Err(e)); break; },
+                    Err(_) => { let _ = tx.try_send(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "response body idle timeout"))); break; }
+                }
+            }
+        }
+    });
+    futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    })
+}
+
+async fn disk_watchdog(root: &std::path::Path, limit: u64) {
+    loop {
+        let mut pending = vec![root.to_path_buf()];
+        let mut total = 0u64;
+        while let Some(path) = pending.pop() {
+            let Ok(mut entries) = read_dir(path).await else {
+                return;
+            };
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let Ok(meta) = tokio::fs::symlink_metadata(entry.path()).await else {
+                    continue;
+                };
+                if meta.is_dir() {
+                    pending.push(entry.path());
+                } else {
+                    total = total.saturating_add(meta.len());
+                }
+                if total > limit {
+                    return;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 /// Shared application state.
 pub struct AppState {
     pub config: Config,
     /// Bounds how many `fb2c` child processes may run concurrently.
-    pub semaphore: Semaphore,
+    pub semaphore: Arc<Semaphore>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Arc<AppState> {
-        let semaphore = Semaphore::new(config.max_concurrent_conversions);
+        let semaphore = Arc::new(Semaphore::new(config.max_concurrent_conversions));
         Arc::new(AppState { config, semaphore })
     }
 }
@@ -140,6 +199,7 @@ fn kill_group(pgid: i32) {
 struct JobGuard {
     dir: Option<PathBuf>,
     pgid: Option<i32>,
+    stderr_task: Option<tokio::task::JoinHandle<String>>,
 }
 
 impl JobGuard {
@@ -151,6 +211,14 @@ impl JobGuard {
 
 impl Drop for JobGuard {
     fn drop(&mut self) {
+        if let Some(task) = self.stderr_task.take() {
+            task.abort();
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    let _ = task.await;
+                });
+            }
+        }
         if let Some(pgid) = self.pgid.take() {
             kill_group(pgid);
         }
@@ -272,7 +340,7 @@ async fn convert_file(
     // `queue_wait_secs`.
     let permit = match tokio::time::timeout(
         Duration::from_secs(cfg.queue_wait_secs),
-        state.semaphore.acquire(),
+        state.semaphore.clone().acquire_owned(),
     )
     .await
     {
@@ -301,6 +369,7 @@ async fn convert_file(
     let mut guard = JobGuard {
         dir: Some(job_dir.clone()),
         pgid: None,
+        stderr_task: None,
     };
     if let Err(err) = create_dir_all(&tmp_dir).await {
         error!("Failed to create job tmp directory: {:?}", err);
@@ -367,10 +436,23 @@ async fn convert_file(
     // process_group(0) makes the child's pid its pgid.
     guard.pgid = child.id().map(|p| p as i32);
 
-    let stderr_task = child.stderr.take().map(|s| tokio::spawn(capture_stderr(s)));
+    guard.stderr_task = child.stderr.take().map(|s| tokio::spawn(capture_stderr(s)));
 
-    let wait_result =
-        tokio::time::timeout(Duration::from_secs(cfg.fb2c_timeout_secs), child.wait()).await;
+    let wait_result = tokio::select! {
+        result = tokio::time::timeout(Duration::from_secs(cfg.fb2c_timeout_secs), child.wait()) => result,
+        _ = disk_watchdog(&job_dir, cfg.job_max_disk_bytes) => {
+            if let Some(pgid) = guard.pgid { kill_group(pgid); }
+            let _ = child.kill().await;
+            if let Some(task) = guard.stderr_task.take() { task.abort(); let _ = task.await; }
+            count("disk_limit", fmt);
+            return StatusCode::INSUFFICIENT_STORAGE.into_response();
+        }
+    };
+
+    // The leader exiting does not imply that its helper processes exited.
+    if let Some(pgid) = guard.pgid.take() {
+        kill_group(pgid);
+    }
 
     let record_duration = || {
         metrics::histogram!("fb2conversion_duration_seconds", "format" => fmt)
@@ -380,6 +462,11 @@ async fn convert_file(
     let exit_status = match wait_result {
         Ok(Ok(status)) => status,
         Ok(Err(err)) => {
+            let _ = child.kill().await;
+            if let Some(task) = guard.stderr_task.take() {
+                task.abort();
+                let _ = task.await;
+            }
             error!("Failed to wait for fb2c: {:?}", err);
             count("error", fmt);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -393,6 +480,10 @@ async fn convert_file(
                 kill_group(pgid);
             }
             let _ = child.kill().await; // also reaps
+            if let Some(task) = guard.stderr_task.take() {
+                task.abort();
+                let _ = task.await;
+            }
             record_duration();
             count("timeout", fmt);
             return StatusCode::GATEWAY_TIMEOUT.into_response();
@@ -401,12 +492,15 @@ async fn convert_file(
 
     record_duration();
 
-    let stderr_text = match stderr_task {
-        Some(t) => tokio::time::timeout(Duration::from_secs(2), t)
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .unwrap_or_default(),
+    let stderr_text = match guard.stderr_task.take() {
+        Some(mut task) => match tokio::time::timeout(Duration::from_secs(2), &mut task).await {
+            Ok(result) => result.unwrap_or_default(),
+            Err(_) => {
+                task.abort();
+                let _ = task.await;
+                String::new()
+            }
+        },
         None => String::new(),
     };
 
@@ -465,10 +559,11 @@ async fn convert_file(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // Conversion is done; free the slot before streaming.
-    drop(permit);
-
-    let stream = ReaderStream::with_capacity(result_file, 64 * 1024);
+    let stream = idle_timeout_stream(
+        Box::pin(result_file),
+        permit,
+        Duration::from_secs(cfg.body_idle_timeout_secs),
+    );
     let headers = AppendHeaders([(header::CONTENT_LENGTH, content_len)]);
 
     // The open file handle stays valid after unlinking, so the whole job
@@ -553,6 +648,20 @@ pub fn get_router(state: Arc<AppState>) -> Router {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn unpolled_response_releases_slot_after_idle_timeout() {
+        let slots = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = slots.clone().acquire_owned().await.unwrap();
+        let _stream = super::idle_timeout_stream(
+            Box::pin(std::io::Cursor::new(vec![1; 256 * 1024])),
+            permit,
+            std::time::Duration::from_millis(20),
+        );
+        let _permit = tokio::time::timeout(std::time::Duration::from_secs(1), slots.acquire())
+            .await
+            .unwrap()
+            .unwrap();
+    }
     use super::*;
 
     #[test]

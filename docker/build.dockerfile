@@ -25,7 +25,7 @@ RUN cargo build --release --bin fb2converter_server
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y openssl ca-certificates curl \
+    && apt-get install -y openssl ca-certificates curl tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-ca-certificates
@@ -48,4 +48,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 USER app
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/start.sh"]

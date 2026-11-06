@@ -31,6 +31,8 @@ fn setup(name: &str, script: &str, timeout: u64) -> (axum::Router, PathBuf) {
         max_concurrent_conversions: 2,
         queue_wait_secs: 1,
         max_output_bytes: 1024 * 1024,
+        job_max_disk_bytes: 4 * 1024 * 1024,
+        body_idle_timeout_secs: 60,
         cleanup_max_age_secs: 3600,
     };
     (api_router(AppState::new(config)), jobs)
@@ -101,7 +103,26 @@ async fn nonzero_exit_is_422_and_cleans_job_dir() {
 }
 
 #[tokio::test]
+async fn disk_watchdog_stops_conversion_before_process_timeout() {
+    let script = r#"dd if=/dev/zero of="$5/oversized" bs=1048576 count=5 2>/dev/null
+sleep 300"#;
+    let (app, jobs) = setup("disk-limit", script, 30);
+    let started = Instant::now();
+    let resp = app.oneshot(req("epub", "k")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::INSUFFICIENT_STORAGE);
+    assert!(started.elapsed() < Duration::from_secs(5));
+    wait_empty(&jobs).await;
+}
+
+#[tokio::test]
 async fn timeout_kills_process_group_and_cleans_job_dir() {
+    // Adopt orphan helpers in this test process so we can verify actual reaping,
+    // rather than depending on the host/container PID 1 to reap them.
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) },
+        0
+    );
     // The shell spawns a background grandchild that records its pid, then both hang.
     let script = r#"sleep 300 &
 echo $! > "$(dirname "$4")/child.pid"
@@ -134,20 +155,12 @@ wait"#;
     let proc_path = format!("/proc/{pid}");
     let mut gone = false;
     for _ in 0..50 {
-        // A killed-but-unreaped zombie (reparented to init) still has /proc entry;
-        // treat zombie state as dead.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG);
+        }
         match std::fs::read_to_string(format!("{proc_path}/stat")) {
             Err(_) => {
-                gone = true;
-                break;
-            }
-            Ok(s)
-                if s.rsplit(')')
-                    .next()
-                    .unwrap_or("")
-                    .trim_start()
-                    .starts_with('Z') =>
-            {
                 gone = true;
                 break;
             }
