@@ -1,10 +1,18 @@
 use fb2converter_server::{config::Config, get_router, remove_temp_files, AppState};
 use sentry::{types::Dsn, ClientOptions};
-use sentry_tracing::EventFilter;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{
+    filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
+};
+
+fn sentry_error_layer<S>() -> impl Layer<S>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    sentry_tracing::ErrorLayer::new().with_filter(LevelFilter::ERROR)
+}
 
 async fn start_scheduler(state: Arc<AppState>) -> JobScheduler {
     let scheduler = JobScheduler::new().await.expect("scheduler init");
@@ -77,20 +85,15 @@ async fn main() {
         });
 
     // Default integrations (including panic reporting) stay enabled.
-    let _guard = sentry::init(ClientOptions {
-        dsn,
-        ..Default::default()
-    });
-
-    let sentry_layer = sentry_tracing::layer().event_filter(|md| match md.level() {
-        &tracing::Level::ERROR => EventFilter::Event,
-        _ => EventFilter::Ignore,
-    });
+    let mut sentry_options = ClientOptions::default();
+    sentry_options.dsn = dsn;
+    let _guard = sentry::init(sentry_options);
 
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(tracing_subscriber::fmt::layer().with_target(false))
-        .with(sentry_layer)
+        .with(sentry_tracing::SpanLayer::new().with_filter(LevelFilter::INFO))
+        .with(sentry_error_layer())
         .init();
 
     let state = AppState::new(config);
@@ -111,5 +114,28 @@ async fn main() {
     info!("Scheduler shutdown...");
     if let Err(err) = scheduler.shutdown().await {
         error!("Scheduler shutdown error: {:?}", err);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tracing_errors_reach_the_initialized_sentry_client_only() {
+        let events = sentry::test::with_captured_events(|| {
+            let subscriber = tracing_subscriber::registry().with(sentry_error_layer());
+            tracing::subscriber::with_default(subscriber, || {
+                tracing::trace!("ignored trace");
+                tracing::debug!("ignored debug");
+                tracing::info!("ignored info");
+                tracing::warn!("ignored warning");
+                tracing::error!("captured error");
+            });
+        });
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].level, sentry::Level::Error);
+        assert_eq!(events[0].message.as_deref(), Some("captured error"));
+        assert!(events[0].breadcrumbs.is_empty());
     }
 }
